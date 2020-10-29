@@ -1,0 +1,110 @@
+---
+title: "Untitled"
+author: "Jingwen Xu"
+date: "2020/10/28"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(drat)
+library(hurricaneexposuredata)
+library(hurricaneexposure)
+library(maps)
+library(magrittr)
+library(stringr)
+library(tidyr)
+library(sf)
+library(sp)
+library(tmap)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+addRepo("geanders")
+
+
+data("hurr_tracks")
+
+data("rain")
+
+head(hurr_tracks)
+
+head(rain)
+```
+
+## Data preparation
+```{r}
+States<-c("texas","oklahoma","kansas","louisiana","arkansas","missouri","iowa","wisconsin","michigan","illinois","indiana","ohio","kentucky","tennessee","alabama","mississippi","florida","georgia","south carolina","north carolina","virginia","west virginia","maryland","delaware","pennsylvania","new jersey","new york","connecticut","rhode island","massachusetts","vermont","new hampshire","maine")
+MainStates<-map_data("county",States)
+states<-map_data("state",States)
+ggplot() + geom_polygon(data = MainStates, aes( x = long, y = lat, group = group), fill="white", color="grey") +
+  theme_void() + 
+  coord_map()
+
+## For Floyd-1999
+raindata<-rain%>%filter(rain$storm_id== "Floyd-1999")
+floyd_rain<-raindata%>%group_by(fips,storm_id)%>%summarise(precip_t=sum(precip))
+county<-county.fips
+county$fips<-as.character(county$fips)
+county$fips<-str_pad(county$fips,5,side="left",pad="0")
+county%<>%separate(polyname,c("region","subregion"),sep=",")
+floydr<-left_join(floyd_rain,county,by="fips")
+Floyd_rain<-left_join(MainStates,floydr,by=c("region","subregion"))
+Floyd_rain$precip_t[is.na(Floyd_rain$precip_t)]=0.01
+Floyd_rain$precip_t<-cut(Floyd_rain$precip_t,breaks=c(-1,25,50,75,100,120,150,175,200,250),labels=c("[0,25]","(25,50]","(50,75]","(75,100]","(100,125]","(125,150]","(150,175]","(175,200]","(200,222]"),ordered_result=TRUE)
+Floyd_track<-hurr_tracks%>%filter(storm_id=="Floyd-1999")
+
+## For Allison-2001
+raindata_1<-rain%>%filter(rain$storm_id=="Allison-2001")
+allison_rain<-raindata_1%>%group_by(fips,storm_id)%>%summarise(precip_t=sum(precip))
+allisonr<-left_join(allison_rain,county,by="fips")
+Allison_rain<-left_join(MainStates,allisonr,by=c("region","subregion"))
+Allison_rain$precip_t[is.na(Allison_rain$precip_t)]=0.01
+Allison_rain$precip_t<-cut(Allison_rain$precip_t,breaks=c(-1,175,500),labels=c("Unexposed","Exposed"),ordered_result = TRUE)
+Allison_track<-hurr_tracks%>%filter(storm_id=="Allison-2001")
+
+```
+
+## Plot Floyd-1999 using ggplot2
+
+```{r}
+ggplot()+geom_polygon(data=Floyd_rain,aes(x=long,y=lat,fill=precip_t,group=group),color="grey",size=0.2,alpha=0.9)+geom_polygon(data=states,aes(x=long,y=lat,group=group),color="black",fill="white",size=0.2,alpha=0.1)+geom_path(data=Floyd_track,aes(x=longitude,y=latitude),color="red")+ggtitle("Floyd-1999")+scale_fill_brewer(name="Rainfall (mm)",palette="Blues")
+```
+
+## Plot Allison-2001 using ggplot2
+
+```{r}
+ggplot()+geom_polygon(data=Allison_rain,aes(x=long,y=lat,fill=precip_t,group=group),color="grey",size=0.2,alpha=0.9)+geom_polygon(data=states,aes(x=long,y=lat,group=group),color="black",fill="white",size=0.2,alpha=0.1)+geom_path(data=Allison_track,aes(x=longitude,y=latitude),color="red")+ggtitle("Allison-2001")+scale_fill_brewer(name="Rain>175mm",palette="PiYG")
+```
+
+
+## Plot Floyd-1999 using tmap
+
+```{r}
+##At first, we need to transform the data frame to spatial data.
+Map=st_as_sf(map('county',plot=F,fill=T))
+Map%<>%separate(ID,c("region","subregion"),sep=",")
+tf<-left_join(Map,county,by=c("region","subregion"))
+tf_rain<-right_join(tf,floyd_rain,by="fips")
+tf_rain$scale<-cut(tf_rain$precip_t,breaks=c(-1,25,50,75,100,120,150,175,200,250),labels=c("[0,25]","(25,50]","(50,75]","(75,100]","(100,125]","(125,150]","(150,175]","(175,200]","(200,222]"),ordered_result=TRUE)
+t_Floyd_track=cbind(Floyd_track$longitude,Floyd_track$latitude)%>%Line()%>%
+  Lines(ID='Floyd-1999')%>%list()%>%SpatialLines()
+tm_shape(tf_rain,title="Floyd-1999")+
+  tm_polygons("scale",palette="Blues",title="Rainfall(mm)")+
+  tm_shape(t_Floyd_track)+tm_lines(col='red4',lwd =1.2)+tm_layout(main.title='Floyd-1999')
+```
+
+## Plot Allison-2001 using tmap
+
+```{r}
+af_rain<-right_join(tf,allison_rain,by="fips")
+af_rain$scale<-cut(af_rain$precip_t,breaks=c(-1,175,500),labels=c("Unexposed","Exposed"),ordered_result = TRUE)
+t_Allison_track=cbind(Allison_track$longitude,Allison_track$latitude)%>%
+  Line()%>%Lines(ID='Allison-2001')%>%list()%>%SpatialLines()
+tm_shape(af_rain,title="Floyd-1999")+
+  tm_polygons("scale",palette=c("gray93","dodgerblue4"),title="Rain > 175 mm")+
+  tm_shape(t_Allison_track)+tm_lines(col='red4',lwd=1.2)+tm_style("watercolor")+tm_layout(main.title='Allison-2001')
+
+```
+
