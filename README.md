@@ -1,3 +1,3 @@
 # Mapping
 
-### This is a mapping tool practice. 
+### This is a map tool practice. It visualizes the geographic information on the map.
